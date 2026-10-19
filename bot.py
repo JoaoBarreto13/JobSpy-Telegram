@@ -19,6 +19,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+import math
 import re
 import traceback
 from datetime import datetime
@@ -46,10 +47,12 @@ from config import (
     AUTHORIZED_USERS,
     AVAILABLE_SITES,
     BOT_TOKEN,
+    DEFAULT_COUNTRY,
     JOB_TYPES,
     MAX_RESULTS,
     SITE_DISPLAY_NAMES,
 )
+from portais_br import scrape_all_jobs
 
 # ---------------------------------------------------------------------------
 #  Logging
@@ -123,71 +126,96 @@ async def _check_auth(update: Update) -> bool:
 # ---------------------------------------------------------------------------
 #  Utilidades de formatação
 # ---------------------------------------------------------------------------
-def _escape(text: str | None) -> str:
-    if not text:
+def _is_na(value: Any) -> bool:
+    """Verifica se um valor é nulo, NaN ou string vazia/inválida."""
+    if value is None:
+        return True
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return True
+    s = str(value).strip().lower()
+    return s in ("", "nan", "none", "nat", "<na>", "null")
+
+
+def _clean_text(value: Any, fallback: str = "N/A") -> str:
+    """Retorna o texto sanitizado em HTML ou o fallback (N/A) se for nulo/NaN."""
+    if _is_na(value):
+        return fallback
+    return html.escape(str(value).strip())
+
+
+def _escape(text: Any) -> str:
+    """Escapa texto para HTML, tratando NaN e nulos."""
+    if _is_na(text):
         return ""
-    return html.escape(str(text))
+    return html.escape(str(text).strip())
 
 
 def _format_job(job: dict[str, Any], index: int) -> str:
-    """Formata um job como HTML para o Telegram."""
-    title = _escape(job.get("title", "Sem título"))
-    company = _escape(job.get("company", "Não informada"))
-    location = _escape(job.get("location", "Não informada"))
-    site = _escape(job.get("site", ""))
-    job_url = job.get("job_url", "")
-    date_posted = job.get("date_posted", "")
-    job_type = job.get("job_type", "")
+    """Formata um job como HTML para o Telegram substituindo dados ausentes por N/A."""
+    title = _clean_text(job.get("title"), "N/A")
+    company = _clean_text(job.get("company"), "N/A")
+    location = _clean_text(job.get("location"), "N/A")
+    site = _clean_text(job.get("site"), "")
+    job_url = "" if _is_na(job.get("job_url")) else str(job.get("job_url")).strip()
+    date_posted = job.get("date_posted")
+    job_type = job.get("job_type")
     is_remote = job.get("is_remote")
 
     min_amount = job.get("min_amount")
     max_amount = job.get("max_amount")
-    currency = job.get("currency", "")
-    interval = job.get("interval", "")
+    currency = _clean_text(job.get("currency"), "BRL")
+    interval = "" if _is_na(job.get("interval")) else str(job.get("interval"))
+
+    has_min = not _is_na(min_amount)
+    has_max = not _is_na(max_amount)
 
     # Salário
     salary = ""
-    if min_amount or max_amount:
+    if has_min or has_max:
         interval_pt = {
             "yearly": "/ano",
             "monthly": "/mês",
             "weekly": "/sem",
             "daily": "/dia",
             "hourly": "/h",
-        }.get(str(interval), "")
+        }.get(str(interval).lower(), "")
 
-        if min_amount and max_amount:
-            salary = f"💰 {currency} {min_amount:,.0f} - {max_amount:,.0f}{interval_pt}"
-        elif min_amount:
-            salary = f"💰 A partir de {currency} {min_amount:,.0f}{interval_pt}"
+        if has_min and has_max:
+            salary = f"💰 {currency} {float(min_amount):,.0f} - {float(max_amount):,.0f}{interval_pt}"
+        elif has_min:
+            salary = f"💰 A partir de {currency} {float(min_amount):,.0f}{interval_pt}"
         else:
-            salary = f"💰 Até {currency} {max_amount:,.0f}{interval_pt}"
+            salary = f"💰 Até {currency} {float(max_amount):,.0f}{interval_pt}"
 
     # Tipo de vaga
     tipo = ""
-    if job_type:
+    if not _is_na(job_type):
         tipos_pt = []
         for t in str(job_type).split(", "):
-            t_lower = t.strip().lower()
-            tipos_pt.append(JOB_TYPES.get(t_lower, t))
-        tipo = f"📌 {', '.join(tipos_pt)}"
+            t_clean = t.strip()
+            if not _is_na(t_clean):
+                t_lower = t_clean.lower()
+                tipos_pt.append(JOB_TYPES.get(t_lower, t_clean))
+        if tipos_pt:
+            tipo = f"📌 {', '.join(tipos_pt)}"
 
     # Remoto
     remoto = ""
-    if is_remote:
+    if is_remote is True:
         remoto = "🏠 Remoto"
 
     # Data
     data = ""
-    if date_posted:
+    if not _is_na(date_posted):
+        date_str = str(date_posted).strip()
         try:
-            dt = datetime.strptime(str(date_posted), "%Y-%m-%d")
+            dt = datetime.strptime(date_str[:10], "%Y-%m-%d")
             data = f"📅 {dt.strftime('%d/%m/%Y')}"
         except (ValueError, TypeError):
-            data = f"📅 {date_posted}"
+            data = f"📅 {date_str}"
 
     # Site de origem
-    site_icon = SITE_DISPLAY_NAMES.get(site, f"🔍 {site}")
+    site_icon = SITE_DISPLAY_NAMES.get(str(site).lower(), f"🔍 {site}" if site else "🔍 Vaga")
 
     lines = [
         f"<b>{index}. {title}</b>",
@@ -239,10 +267,8 @@ async def _do_scrape(
     """Executa o scraping em uma thread separada para não bloquear o event loop."""
     import pandas as pd  # noqa: F811
 
-    from jobspy import scrape_jobs
-
     def _scrape() -> pd.DataFrame:
-        return scrape_jobs(**params)
+        return scrape_all_jobs(**params)
 
     return await context.application.create_task(
         context.application.loop.run_in_executor(None, _scrape)
@@ -265,9 +291,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(
         "🔍 <b>JobSpy Bot</b> — Busca de Vagas de Emprego\n\n"
-        "Eu busco vagas em <b>LinkedIn</b>, <b>Indeed</b>, <b>Glassdoor</b>, "
-        "<b>ZipRecruiter</b>, <b>Bayt</b>, <b>Naukri</b>, <b>BDJobs</b> e "
-        "<b>HelloWork</b> para você!\n\n"
+        "Eu busco vagas nos principais portais do <b>Brasil</b> (<b>Gupy</b>, <b>InfoJobs</b>, "
+        "<b>Programathor</b>, <b>Trabalha Brasil</b>) e <b>Globais</b> (<b>LinkedIn</b>, "
+        "<b>Indeed</b>, <b>Glassdoor</b>, <b>ZipRecruiter</b>) para você!\n\n"
         "📋 <b>Comandos disponíveis:</b>\n\n"
         "/buscar — Busca rápida de vagas\n"
         "/avancada — Busca avançada com filtros\n"
@@ -292,11 +318,11 @@ async def cmd_ajuda(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "📖 <b>Ajuda — JobSpy Bot</b>\n\n"
         "<b>🔎 Busca Rápida</b>\n"
         "<code>/buscar python developer São Paulo</code>\n"
-        "Busca vagas com o termo em todos os sites.\n\n"
+        "Busca vagas com o termo nos portais selecionados.\n\n"
         "<b>🔎 Busca Avançada</b>\n"
         "<code>/avancada</code>\n"
         "Passo a passo interativo com filtros:\n"
-        "• Sites específicos\n"
+        "• Portais específicos (Gupy, InfoJobs, LinkedIn, etc.)\n"
         "• Localização\n"
         "• Tipo de vaga (integral, estágio, etc.)\n"
         "• Remoto/presencial\n"
@@ -326,11 +352,16 @@ async def cmd_sites(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     lines = ["🌐 <b>Sites disponíveis para busca:</b>\n"]
-    for site_key in AVAILABLE_SITES:
+    lines.append("🇧🇷 <b>Portais Brasileiros:</b>")
+    for site_key in ["gupy", "infojobs", "programathor", "trabalha_brasil"]:
+        display = SITE_DISPLAY_NAMES.get(site_key, site_key)
+        lines.append(f"  • {display} (<code>{site_key}</code>)")
+    lines.append("\n🌐 <b>Portais Internacionais:</b>")
+    for site_key in ["linkedin", "indeed", "glassdoor", "zip_recruiter"]:
         display = SITE_DISPLAY_NAMES.get(site_key, site_key)
         lines.append(f"  • {display} (<code>{site_key}</code>)")
 
-    lines.append("\n💡 Na busca avançada você pode escolher quais usar.")
+    lines.append("\n💡 Na busca avançada (/avancada) você pode escolher quais usar.")
     await update.message.reply_text(
         "\n".join(lines), parse_mode=ParseMode.HTML
     )
@@ -362,16 +393,16 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
     try:
-        from jobspy import scrape_jobs
-
         import asyncio
 
         loop = asyncio.get_event_loop()
         jobs_df = await loop.run_in_executor(
             None,
-            lambda: scrape_jobs(
+            lambda: scrape_all_jobs(
+                site_name=AVAILABLE_SITES,
                 search_term=search_term,
                 results_wanted=min(MAX_RESULTS, 10),
+                country_indeed=DEFAULT_COUNTRY,
                 verbose=0,
                 description_format="plain",
             ),
@@ -615,7 +646,7 @@ async def avancada_remoto_callback(
     await query.edit_message_text(
         "🌍 <b>Passo 6/7:</b> País para Indeed/Glassdoor?\n\n"
         "Envie o nome do país em inglês (ex: <code>brazil</code>, <code>usa</code>, <code>uk</code>)\n"
-        "Ou envie <code>pular</code> para usar o padrão (USA).",
+        f"Ou envie <code>pular</code> para usar o padrão ({DEFAULT_COUNTRY.upper()}).",
         parse_mode=ParseMode.HTML,
     )
     return BUSCA_PAIS
@@ -627,6 +658,8 @@ async def avancada_pais(
     text = update.message.text.strip()
     if text.lower() != "pular":
         context.user_data["search_params"]["country_indeed"] = text.lower()
+    else:
+        context.user_data["search_params"]["country_indeed"] = DEFAULT_COUNTRY
 
     await update.message.reply_text(
         "🔢 <b>Passo 7/7:</b> Quantos resultados? (1-50)\n\n"
@@ -707,6 +740,7 @@ async def avancada_confirma_callback(
 
     params = context.user_data.get("search_params", {})
     params.setdefault("results_wanted", MAX_RESULTS)
+    params.setdefault("country_indeed", DEFAULT_COUNTRY)
     params["verbose"] = 0
     params["description_format"] = "plain"
 
@@ -715,12 +749,10 @@ async def avancada_confirma_callback(
     )
 
     try:
-        from jobspy import scrape_jobs
-
         import asyncio
 
         loop = asyncio.get_event_loop()
-        jobs_df = await loop.run_in_executor(None, lambda: scrape_jobs(**params))
+        jobs_df = await loop.run_in_executor(None, lambda: scrape_all_jobs(**params))
 
         if jobs_df.empty:
             await query.edit_message_text(
@@ -972,15 +1004,14 @@ async def _alert_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     params["verbose"] = 0
     params["description_format"] = "plain"
     params.setdefault("results_wanted", 10)
+    params.setdefault("country_indeed", DEFAULT_COUNTRY)
     params.setdefault("hours_old", alert_data["interval_minutes"] * 2 // 60 or 24)
 
     try:
-        from jobspy import scrape_jobs
-
         import asyncio
 
         loop = asyncio.get_event_loop()
-        jobs_df = await loop.run_in_executor(None, lambda: scrape_jobs(**params))
+        jobs_df = await loop.run_in_executor(None, lambda: scrape_all_jobs(**params))
 
         if jobs_df.empty:
             return

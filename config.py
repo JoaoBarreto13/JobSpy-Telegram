@@ -29,20 +29,24 @@ ALERT_INTERVAL_MINUTES: int = int(os.getenv("ALERT_INTERVAL_MINUTES", "30"))
 # Máximo de resultados por busca
 MAX_RESULTS: int = int(os.getenv("MAX_RESULTS", "15"))
 
-# Sites disponíveis para busca
+# Sites disponíveis para busca (JobSpy + Portais Brasileiros)
 AVAILABLE_SITES = [
+    "gupy",
+    "infojobs",
+    "programathor",
+    "trabalha_brasil",
     "linkedin",
     "indeed",
     "glassdoor",
     "zip_recruiter",
-    "bayt",
-    "naukri",
-    "bdjobs",
-    "hellowork",
 ]
 
 # Mapeamento de nomes amigáveis para sites
 SITE_DISPLAY_NAMES = {
+    "gupy": "🟢 Gupy",
+    "infojobs": "💼 InfoJobs",
+    "programathor": "💻 Programathor",
+    "trabalha_brasil": "🇧🇷 Trabalha Brasil",
     "linkedin": "🔗 LinkedIn",
     "indeed": "📋 Indeed",
     "glassdoor": "🪟 Glassdoor",
@@ -52,6 +56,9 @@ SITE_DISPLAY_NAMES = {
     "bdjobs": "🇧🇩 BDJobs",
     "hellowork": "🇫🇷 HelloWork",
 }
+
+# País padrão para busca no Indeed/Glassdoor
+DEFAULT_COUNTRY = os.getenv("DEFAULT_COUNTRY", "brazil")
 
 # Tipos de vaga disponíveis
 JOB_TYPES = {

@@ -38,8 +38,6 @@ venv.bak/
 # ==============================================================================
 # Variáveis de ambiente (tokens e segredos)
 .env
-.env.*
-!.env.example
 
 # Base local de alertas persistidos
 alertas.json

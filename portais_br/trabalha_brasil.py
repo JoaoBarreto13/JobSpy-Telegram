@@ -161,7 +161,9 @@ def scrape_trabalha_brasil(
 
                 if location:
                     loc_low = location.strip().lower()
-                    if loc_low == "remoto":
+                    if loc_low in ("brasil", "brazil"):
+                        pass  # Trabalha Brasil é 100% Brasil
+                    elif loc_low == "remoto":
                         if not job_is_remote:
                             continue
                     elif loc_low not in loc_str.lower() and loc_low not in clean_text.lower():

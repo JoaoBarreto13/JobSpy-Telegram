@@ -129,7 +129,9 @@ def scrape_programathor(
                 # Filtragem de localidade se especificada
                 if location:
                     loc_low = location.strip().lower()
-                    if loc_low == "remoto":
+                    if loc_low in ("brasil", "brazil"):
+                        pass  # Portal 100% brasileiro de tech: todas as vagas são no Brasil
+                    elif loc_low == "remoto":
                         if not job_is_remote:
                             continue
                     elif (

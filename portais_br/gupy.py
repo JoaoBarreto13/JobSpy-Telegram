@@ -98,7 +98,9 @@ def scrape_gupy(
                 if location:
                     loc_low = location.strip().lower()
                     text_to_check = f"{loc_str} {item.get('description', '')}".lower()
-                    if loc_low == "remoto":
+                    if loc_low in ("brasil", "brazil"):
+                        pass  # Gupy é 100% Brasil; não descartar vagas das cidades brasileiras
+                    elif loc_low == "remoto":
                         if not item_is_remote and "remoto" not in text_to_check:
                             continue
                     elif loc_low not in text_to_check:

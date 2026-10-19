@@ -113,9 +113,18 @@ class LinkedIn(Scraper):
 
     def _search_params(self) -> dict[str, str | int]:
         scraper_input = self.scraper_input
+        location = scraper_input.location
+        if location:
+            # LinkedIn expects country names in English. 'Brasil' causes LinkedIn
+            # to fail to recognize the country and fallback to USA defaults.
+            import re
+            location = re.sub(r"\bbrasil\b", "Brazil", str(location), flags=re.IGNORECASE)
+            if location.strip().lower() in ("brasil", "brazil"):
+                location = "Brazil"
+
         params: dict[str, str | int | None] = {
             "keywords": scraper_input.search_term,
-            "location": scraper_input.location,
+            "location": location,
             "distance": scraper_input.distance,
         }
         if scraper_input.easy_apply:

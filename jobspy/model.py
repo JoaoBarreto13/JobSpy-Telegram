@@ -105,6 +105,7 @@ country_aliases = {
     "united kingdom": "uk",
     "us": "usa",
     "united states": "usa",
+    "brasil": "brazil",
 }
 
 

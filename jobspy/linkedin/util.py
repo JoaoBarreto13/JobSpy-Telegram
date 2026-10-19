@@ -41,6 +41,13 @@ def parse_location(text: str) -> Location:
         return Location(city=city, state=state, country=country)
     if len(parts) == 2:
         city, last = parts
+        br_states = {
+            "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA",
+            "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN",
+            "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+        }
+        if last.upper() in br_states:
+            return Location(city=city, state=last.upper(), country=Country.BRAZIL)
         if re.fullmatch(r"[A-Z]{2}", last):
             return Location(city=city, state=last, country=Country.USA)
         return Location(city=city, country=last)

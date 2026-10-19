@@ -188,12 +188,19 @@ def scrape_all_jobs(
         if not jobspy_sites:
             return pd.DataFrame(columns=all_columns)
         try:
+            import re
             from jobspy import scrape_jobs
+
+            jobspy_loc = location
+            if jobspy_loc:
+                jobspy_loc = re.sub(r"\bbrasil\b", "Brazil", str(jobspy_loc), flags=re.IGNORECASE)
+                if jobspy_loc.strip().lower() in ("brasil", "brazil"):
+                    jobspy_loc = "Brazil"
 
             return scrape_jobs(
                 site_name=jobspy_sites,
                 search_term=search_term,
-                location=location,
+                location=jobspy_loc,
                 is_remote=is_remote,
                 job_type=job_type,
                 results_wanted=results_wanted or 15,
@@ -226,6 +233,35 @@ def scrape_all_jobs(
 
     # Adiciona os resultados dos portais BR
     combined_rows.extend(br_results)
+
+    # Filtro de segurança: Se o usuário especificou busca no Brasil, descarta vagas no exterior
+    if location:
+        import re
+        is_search_in_brazil = bool(re.search(r"\bbra[sz]il\b", str(location), flags=re.IGNORECASE))
+        if is_search_in_brazil:
+            us_states_exclusive = {
+                "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+                "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+                "MI", "MN", "MO", "NE", "NV", "NH", "NJ", "NM", "NY", "NC",
+                "ND", "OH", "OK", "OR", "RI", "SD", "TN", "TX", "UT", "VT",
+                "VA", "WA", "WV", "WI", "WY",
+            }
+            filtered_rows: list[dict[str, Any]] = []
+            for item in combined_rows:
+                loc_val = str(item.get("location") or "").strip()
+                loc_lower = loc_val.lower()
+
+                # Se a localização menciona explicitamente USA / Estados Unidos
+                if any(kw in loc_lower for kw in ("usa", "united states", "estados unidos", "u.s.")):
+                    continue
+
+                # Se termina com sigla de estado exclusivo dos EUA (ex: "Scottsdale, AZ")
+                state_match = re.search(r",\s*([A-Za-z]{2})$", loc_val)
+                if state_match and state_match.group(1).upper() in us_states_exclusive:
+                    continue
+
+                filtered_rows.append(item)
+            combined_rows = filtered_rows
 
     # Cria o DataFrame unificado
     if combined_rows:
